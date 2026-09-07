@@ -2,7 +2,7 @@
   "tasks": [
     {
       "id": "t-001",
-      "title": "Typed read/write layer over the repo as a datastore",
+      "title": "Sneakily reworded title",
       "contract": {
         "inputs": "A fine-grained GitHub PAT and a target repo (owner/name), supplied through the config module. Callers ask for one of the three state documents by name.",
         "outputs": "packages/state exports typed read and write functions for state/tasks.json, state/claims.json and state/users.json. Reads return a parsed, validated document. Writes accept a mutation function and commit the result.",

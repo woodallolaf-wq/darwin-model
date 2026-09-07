@@ -1,0 +1,143 @@
+name: pr
+
+# pull_request, never pull_request_target: this runs contributor code, so it
+# must not get a token with write access or see any secret.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # (a) Does it RUN? Not: is it correct. Correctness is judged by a human
+  # through .claude/commands/verify.md, against the task contract.
+  build:
+    name: build and smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund
+          else
+            npm install --no-audit --no-fund
+          fi
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Smoke tests
+        run: npm run test:smoke
+
+  # (b) Contributors must not edit the task table or weaken the checks.
+  guard:
+    name: diff guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fail if the diff touches state/ or tests/
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null || true
+          CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          echo "Changed files:"
+          echo "$CHANGED" | sed 's/^/  /'
+          BAD=$(echo "$CHANGED" | grep -E '^(state/|tests/)' || true)
+          if [ -n "$BAD" ]; then
+            echo ""
+            echo "This PR edits files it must not:"
+            echo "$BAD" | sed 's/^/  /'
+            echo ""
+            echo "state/ is the task table and tests/ are the checks. A task"
+            echo "implementation changes neither. If the contract is wrong, say so"
+            echo "in the PR and leave it to the maintainer."
+            exit 1
+          fi
+          echo "OK — no protected paths touched."
+
+  # (c) State must be valid on every ref, not only after the routine writes it.
+  # The guard above stops PRs editing state/, so this catches a bad merge or a
+  # bad direct push, and it runs the glob self-test that claim collision
+  # detection depends on.
+  state:
+    name: state validity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Glob matcher self-test
+        run: node tools/validate-state.js --self-test
+
+      - name: Validate state/
+        run: node tools/validate-state.js
+
+  # (d) "What I decided" is the data this experiment exists to collect. If it
+  # were optional it would be empty, so it is enforced.
+  decisions:
+    name: decisions recorded
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if "What I decided" is empty
+        # The PR body is attacker-controlled text. It is passed through the
+        # environment and read by a script — never interpolated into the shell,
+        # which would be a script injection.
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+
+          body = os.environ.get("PR_BODY") or ""
+
+          m = re.search(r"^\s*#*\s*What I decided\s*:?\s*$", body, re.I | re.M)
+          if not m:
+              sys.exit(
+                  "PR body has no 'What I decided' section.\n"
+                  "Use the pull request template. One line per open_decision in the task."
+              )
+
+          rest = body[m.end():]
+          # The section ends at the next heading-ish line.
+          nxt = re.search(r"^\s*#*\s*What I rejected", rest, re.I | re.M)
+          section = rest[: nxt.start()] if nxt else rest
+
+          lines = [
+              l.strip().lstrip("-*").strip()
+              for l in section.splitlines()
+          ]
+          content = [
+              l for l in lines
+              if l
+              and not l.startswith("<!--")
+              and l.lower() not in {"n/a", "na", "none", "todo", "-", "tbd"}
+          ]
+
+          if not content:
+              sys.exit(
+                  "'What I decided' is empty.\n"
+                  "The task listed open decisions precisely because they were left to you.\n"
+                  "Write one line per decision, saying what you chose and why."
+              )
+
+          print("OK — %d decision line(s) recorded:" % len(content))
+          for l in content:
+              print("  - " + l)
+          PY

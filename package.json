@@ -1,0 +1,16 @@
+{
+  "name": "darwin-model",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Repo-as-database experiment: a daily agent writes contracts with deliberately open decisions; humans implement them.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "validate:state": "node tools/validate-state.js",
+    "test:glob": "node tools/validate-state.js --self-test",
+    "test:smoke": "node --test \"tests/smoke/**/*.test.js\"",
+    "typecheck": "node -e \"console.log('no TypeScript in the tree yet — t-001 introduces packages/state and a real tsc run')\"",
+    "build": "node -e \"console.log('nothing to build yet — t-001 introduces the first buildable package')\""
+  }
+}

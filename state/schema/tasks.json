@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tasks.json",
+  "title": "Task table",
+  "description": "state/tasks.json — the task table. Appended to by the daily routine, transitioned by /verify.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tasks"],
+  "properties": {
+    "tasks": {
+      "type": "array",
+      "items": { "$ref": "task.json" }
+    }
+  }
+}

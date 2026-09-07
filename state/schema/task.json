@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "task.json",
+  "title": "Task",
+  "description": "One unit of work. The contract fixes the interface; open_decisions is what is deliberately left to the implementer.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "title",
+    "contract",
+    "open_decisions",
+    "touched_paths",
+    "depends_on",
+    "issue",
+    "state"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^t-[0-9]{3}$",
+      "description": "t-001, t-002, ... Never reused, never renumbered."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 120,
+      "description": "One line. Becomes the GitHub issue title."
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inputs", "outputs", "invariants", "must_not_break"],
+      "description": "The interface. Fixed. An implementation that violates this is wrong regardless of how well it works.",
+      "properties": {
+        "inputs": {
+          "type": "string",
+          "minLength": 10,
+          "description": "What the code receives: call signature, file format, request shape."
+        },
+        "outputs": {
+          "type": "string",
+          "minLength": 10,
+          "description": "What it must produce, precisely enough that two people would write the same type."
+        },
+        "invariants": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 5 },
+          "description": "Properties that must hold after the change. Checkable statements, not aspirations."
+        },
+        "must_not_break": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 5 },
+          "description": "Existing behaviour this task is forbidden to change."
+        }
+      }
+    },
+    "open_decisions": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 10 },
+      "description": "Genuine choices left to the implementer. MUST be non-empty: a task whose contract fully determines the implementation is not a valid task for this experiment. This is the data the experiment exists to collect."
+    },
+    "touched_paths": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Glob patterns the implementation may write. A directory must be written as a glob: src/panel/** , not src/panel . Used for claim collision detection."
+    },
+    "depends_on": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^t-[0-9]{3}$" },
+      "description": "Task ids that must be merged before this one can be claimed."
+    },
+    "issue": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "description": "GitHub issue number, or null if the issue could not be created."
+    },
+    "state": {
+      "enum": ["open", "claimed", "in_review", "merged", "rejected"],
+      "description": "open -> claimed -> in_review -> merged | rejected"
+    }
+  }
+}

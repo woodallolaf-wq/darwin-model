@@ -1,0 +1,95 @@
+{
+  "tasks": [
+    {
+      "id": "t-001",
+      "title": "Typed read/write layer over the repo as a datastore",
+      "contract": {
+        "inputs": "A fine-grained GitHub PAT and a target repo (owner/name), supplied through the config module. Callers ask for one of the three state documents by name.",
+        "outputs": "packages/state exports typed read and write functions for state/tasks.json, state/claims.json and state/users.json. Reads return a parsed, validated document. Writes accept a mutation function and commit the result.",
+        "invariants": [
+          "Write path is: GET blob and sha, mutate in memory, PUT with that sha. On a 409, re-read and re-apply the mutation exactly once, then throw.",
+          "Every write is validated against the zod schema before any network call. A document that fails validation never reaches GitHub.",
+          "Reads are cached for 30 seconds.",
+          "The zod schemas agree with state/schema/*.json — same required fields, same patterns, same enum values.",
+          "Node 22, ESM, TypeScript strict. No use of `any`."
+        ],
+        "must_not_break": [
+          "state/schema/*.json stays the canonical shape; the zod schemas mirror it and never diverge from it unilaterally.",
+          "tools/validate-state.js must still pass on any state this library writes.",
+          "The repo root stays CommonJS — no \"type\": \"module\" in the root package.json. tools/validate-state.js is CommonJS and the daily routine invokes it with a bare `node tools/validate-state.js`; adding a root type field breaks the routine's only safety gate. packages/state declares its own package.json with \"type\": \"module\"."
+        ]
+      },
+      "open_decisions": [
+        "Whether the write API takes a mutation callback (read-modify-write in one call) or exposes read and write separately and leaves the sha juggling to the caller.",
+        "Whether the 30s read cache is per-process in-memory or written to disk, and whether a write invalidates the cache for other documents or only its own.",
+        "How a 409 that persists after the single retry is surfaced — a typed error the bot can catch and report, or a plain throw."
+      ],
+      "touched_paths": [
+        "packages/state/**"
+      ],
+      "depends_on": [],
+      "issue": null,
+      "state": "open"
+    },
+    {
+      "id": "t-002",
+      "title": "Discord /task command with claim collision detection",
+      "contract": {
+        "inputs": "A Discord slash command /task from a user in state/users.json, handled by discord.js v14 on top of packages/state.",
+        "outputs": "Picks the first task where state is open, every id in depends_on is merged, and touched_paths does not glob-intersect any active claim. Writes the claim, opens a thread, and posts the contract, the open_decisions list, the issue link and the branch name task/<id>.",
+        "invariants": [
+          "Refuses if the caller already holds a claim, or is not in state/users.json.",
+          "Glob intersection agrees with tools/validate-state.js — in particular src/panel/** must be treated as overlapping src/panel/foo.ts.",
+          "No LLM call anywhere in the bot.",
+          "Two users racing /task cannot both be given overlapping tasks."
+        ],
+        "must_not_break": [
+          "state/claims.json stays schema-valid after every command.",
+          "A failed claim leaves no partial state — no orphan thread, no half-written claim."
+        ]
+      },
+      "open_decisions": [
+        "Whether the race between two simultaneous /task calls is prevented by an in-process queue, by relying on the 409 retry in packages/state, or by an advisory lock document in the repo.",
+        "Whether 'first task' means lowest id, oldest issue, or fewest dependents, when several are eligible.",
+        "Whether the glob matcher is copied from tools/validate-state.js, imported from a new shared package, or reimplemented against the same test table."
+      ],
+      "touched_paths": [
+        "packages/bot/**"
+      ],
+      "depends_on": [
+        "t-001"
+      ],
+      "issue": null,
+      "state": "open"
+    },
+    {
+      "id": "t-003",
+      "title": "Integration harness plus one worked end-to-end example",
+      "contract": {
+        "inputs": "The composed system as it stands on main, exercised through real user paths rather than unit seams.",
+        "outputs": "tests/integration/ with a runner and exactly one fully worked example test that a human can read as a template for the rest.",
+        "invariants": [
+          "Tests exercise composed behaviour, not single functions in isolation.",
+          "The suite runs against main with one command and reports pass or fail without a human reading the output.",
+          "No test depends on live Discord or a real PAT; anything external is faked at the boundary."
+        ],
+        "must_not_break": [
+          ".github/workflows/pr.yml keeps running only tests/smoke on pull requests — integration runs nightly, not per PR.",
+          "The diff guard that stops contributors editing tests/ stays in force."
+        ]
+      },
+      "open_decisions": [
+        "Which runner — node:test, vitest, or a hand-rolled script — weighing zero-dependency operation against ergonomics.",
+        "Where the boundary fake lives: an injected transport, a local HTTP stub, or recorded fixtures replayed from disk.",
+        "Whether the nightly workflow opens one rolling issue labelled integration-break and reuses it, or a fresh issue per failing night."
+      ],
+      "touched_paths": [
+        "tests/integration/**",
+        ".github/workflows/nightly.yml"
+      ],
+      "depends_on": [],
+      "issue": null,
+      "state": "open"
+    }
+  ]
+}

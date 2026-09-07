@@ -1,0 +1,7 @@
+# The daily routine runs in a Linux sandbox. Without normalisation, every file
+# it rewrites comes back as a whole-file diff and review becomes impossible.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary

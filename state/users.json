@@ -1,9 +1,9 @@
 {
   "users": [
     {
-      "discord_id": "000000000000000000",
+      "discord_id": "779050350534590475",
       "github_login": "woodallolaf-wq",
-      "note": "PLACEHOLDER discord_id — replace before the bot goes live. In Discord: Settings > Advanced > Developer Mode on, then right-click the user > Copy User ID."
+      "note": "Olaf — owner. Also the reviewer who runs /verify."
     }
   ]
 }

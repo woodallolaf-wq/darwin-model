@@ -73,9 +73,10 @@ running this experiment on.
 
 ## Status
 
-Bootstrapped, not yet running. Before the first routine fire:
+Live. The daily routine generates against [specs/project.md](specs/project.md);
+`state/users.json` holds the one real contributor.
 
-1. `specs/project.md` is still a template. **The routine is instructed to add
-   nothing while any `TODO` marker remains in it.**
-2. `state/users.json` holds one placeholder `discord_id`.
-3. The Discord bot (`t-002`) does not exist yet, so tasks cannot be claimed.
+The critical path is `t-002`, the Discord `/task` command. Until it ships,
+nothing here or in the sibling project repos
+(`woodallolaf-wq/wildplaces`, `woodallolaf-wq/nostia-landing-redesign`) can be
+claimed by anybody — the claim flow does not exist yet.

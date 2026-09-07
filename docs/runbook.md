@@ -33,9 +33,10 @@ These are the routine doing its job, not breaking:
 
 ## Real failures, and what they mean
 
-**Push or issue creation fails with 403.** *Confirmed on 2026-09-07, and the
-most likely thing to be wrong.* The message reads "Claude doesn't have GitHub
-access to `<owner>/<repo>`".
+**Push or issue creation fails with 403.** *Hit and resolved on 2026-09-07 —
+the installation is now set to All repositories, so this should not recur unless
+that changes.* The message reads "Claude doesn't have GitHub access to
+`<owner>/<repo>`".
 
 The Claude GitHub App is installed on **selected repositories**, and a
 newly-created repo is not in that selection. Note that a *public* repo still

@@ -28,7 +28,7 @@
         "packages/state/**"
       ],
       "depends_on": [],
-      "issue": null,
+      "issue": 1,
       "state": "open"
     },
     {
@@ -59,7 +59,7 @@
       "depends_on": [
         "t-001"
       ],
-      "issue": null,
+      "issue": 2,
       "state": "open"
     },
     {
@@ -88,7 +88,7 @@
         ".github/workflows/nightly.yml"
       ],
       "depends_on": [],
-      "issue": null,
+      "issue": 3,
       "state": "open"
     }
   ]

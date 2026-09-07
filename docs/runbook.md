@@ -33,9 +33,24 @@ These are the routine doing its job, not breaking:
 
 ## Real failures, and what they mean
 
-**Clone or fetch fails.** The routine sandbox cannot reach the repo. If the
-Claude GitHub App is installed on selected repositories rather than all of
-them, `darwin-model` needs adding at github.com/settings/installations.
+**Push or issue creation fails with 403.** *Confirmed on 2026-09-07, and the
+most likely thing to be wrong.* The message reads "Claude doesn't have GitHub
+access to `<owner>/<repo>`".
+
+The Claude GitHub App is installed on **selected repositories**, and a
+newly-created repo is not in that selection. Note that a *public* repo still
+clones fine — anonymous clone needs no app — so a run can read the repo, do all
+its work, and only fail at the very end when it pushes. Issue creation fails the
+same way, earlier and more quietly, because the prompt is written to degrade to
+`"issue": null` rather than stop.
+
+Fix: add the repo at https://github.com/apps/claude/installations/select_target
+(or switch that installation to "All repositories"). Until then the run's work is
+lost when the sandbox is reclaimed — harmless, since the next run regenerates.
+
+A routine cannot even be *created* against a repo the app cannot reach: the
+routines API rejects it at creation time with
+`You don't have access to a repository this routine uses`.
 
 **`git merge --ff-only` fails.** Someone force-pushed `main`, or the routine's
 previous run left a commit that never pushed. Inspect `main` by hand.

@@ -12,6 +12,9 @@ a commit.
 **The number that matters** is how many merged implementations survive contact
 with each other. Not how many tasks got done.
 
+**New here?** [ARCHITECTURE.md](ARCHITECTURE.md) explains how the pieces fit,
+why they were built this way, and the specific things that will break it.
+
 ## The loop
 
 | When | Who | What |

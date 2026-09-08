@@ -93,6 +93,25 @@ For deployment (`P8`) these move into Azure Key Vault and nothing lives on disk.
 
 ---
 
+## Verify before building anything
+
+```
+node tools/check-credentials.mjs
+```
+
+Reads `.env`, checks every credential, prints what each one can and cannot do,
+and never prints a secret value. Exit 0 means the bot has what it needs.
+
+**One trap it exists to catch.** `GET /repos/{owner}/{repo}` returns a
+`permissions` object with `push: true` — but that describes *your* access, not
+the token's. A read-only token still shows `push: true`. The only honest test is
+attempting a write, so the checker creates a throwaway git ref and deletes it.
+
+Fine-grained tokens also return **404, not 403**, for a repo they have no grant
+for. A 404 on a repo you know exists means the token is not scoped to it.
+
+---
+
 ## Checklist
 
 Collect these six values before the bot can run:

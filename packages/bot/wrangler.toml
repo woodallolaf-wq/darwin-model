@@ -1,0 +1,28 @@
+# Cloudflare Worker hosting the Discord interactions endpoint.
+#
+# Secrets are NOT here. Set them with `wrangler secret put <NAME>` so they live
+# in Cloudflare rather than in the repo:
+#
+#   DISCORD_TOKEN, DISCORD_PUBLIC_KEY, GITHUB_TOKEN
+#
+# The rest are plain configuration and are safe to commit.
+
+name = "darwin-bot"
+main = "dist/worker.js"
+compatibility_date = "2025-09-01"
+
+# No nodejs_compat flag: packages/state was made Buffer-free precisely so this
+# runs on the standard runtime. Adding the flag back would be a signal that a
+# Node-only API crept in.
+
+[observability]
+enabled = true
+
+[vars]
+DISCORD_APPLICATION_ID = "1546968884811272224"
+DISCORD_GUILD_ID = "1546336547534667876"
+DISCORD_CHANNEL_START = "1546956372783145100"
+DISCORD_CHANNEL_CODE = "1546956561279221821"
+DISCORD_CHANNEL_MERGED = "1546956814258671618"
+GITHUB_REPOS = "woodallolaf-wq/darwin-model,woodallolaf-wq/wildplaces,woodallolaf-wq/nostia-landing-redesign"
+GITHUB_BRANCH = "main"

@@ -37,7 +37,9 @@ export type StateConfig = {
  * Reads and validates configuration. Throws with every problem listed, rather
  * than the first one, so a misconfigured deploy is one fix rather than five.
  */
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): StateConfig {
+export type EnvRecord = Record<string, string | undefined>;
+
+export function loadConfig(env: EnvRecord): StateConfig {
   const parsed = envSchema.safeParse(env);
   if (!parsed.success) {
     const lines = parsed.error.issues.map((i) => `  - ${i.path.join(".") || "(root)"}: ${i.message}`);

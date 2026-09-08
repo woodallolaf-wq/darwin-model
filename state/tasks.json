@@ -179,6 +179,39 @@
       "depends_on": [],
       "issue": 8,
       "state": "open"
+    },
+    {
+      "id": "t-007",
+      "title": "Serverless HTTP interactions endpoint, replacing the gateway bot",
+      "contract": {
+        "inputs": "Discord interaction POSTs, each signed with Ed25519 and carrying a timestamp header, delivered to a public HTTPS endpoint instead of arriving over a gateway websocket.",
+        "outputs": "packages/bot serves the same four commands from a request handler with no long-lived process. Signature verification, a deferred acknowledgement inside Discord's 3-second deadline, and a follow-up edit once the GitHub work finishes.",
+        "invariants": [
+          "Every request is Ed25519-verified against the application public key before anything else happens. An unverified or replayed request is answered 401 and does nothing.",
+          "A PING (type 1) is answered with a PONG (type 1). Discord sends one to validate the endpoint and will not save it otherwise.",
+          "Commands acknowledge with a deferred response immediately and edit the original message when the work completes, because reading three GitHub repos does not fit in 3 seconds.",
+          "eligibility.ts, service.ts and format.ts are untouched. The hosting model is a shell concern; if a claim rule has to change to make this work, the seam was wrong.",
+          "No Node-only APIs on the request path — no Buffer, no node:crypto — so the same handler runs on a worker runtime and under Node."
+        ],
+        "must_not_break": [
+          "The claim rules and their tests. Two users still cannot claim overlapping tasks, and one person still holds one claim across all projects.",
+          "packages/state stays the only code that talks to GitHub."
+        ]
+      },
+      "open_decisions": [
+        "Whether to keep the discord.js gateway entry alongside the HTTP one for local development, or delete it. Two runtimes drift; one runtime means local testing needs a tunnel.",
+        "Where the follow-up work runs after the deferred acknowledgement — waitUntil on the worker platform, or a queue. waitUntil is far simpler and bounded by the platform's CPU limit, which a three-repo read may or may not fit inside.",
+        "Whether to drop @octokit/rest for plain fetch in packages/state. Octokit is a large dependency for two API calls and its Node assumptions are what force compatibility flags on a worker runtime."
+      ],
+      "touched_paths": [
+        "packages/bot/**",
+        "packages/state/src/store.ts"
+      ],
+      "depends_on": [
+        "t-002"
+      ],
+      "issue": 11,
+      "state": "open"
     }
   ]
 }

@@ -1,149 +1,157 @@
 /**
- * The four slash commands. Thin: parse the interaction, call the service,
- * render the result. Every decision that matters lives in eligibility.ts, and
- * every string in format.ts.
+ * The four commands: their registration shape, and what each one does.
+ *
+ * Thin by design. Every rule that decides whether a claim is allowed lives in
+ * eligibility.ts, and every string in format.ts. This file only maps an
+ * interaction to a call and back to text.
  *
  * No LLM is called anywhere in this package. The bot is a deterministic
- * dispatcher — an unpredictable one would be unusable, because a contributor
- * has to trust that `/task` gives the same answer to the same board.
+ * dispatcher — a contributor has to trust that `/task` gives the same answer to
+ * the same board.
  */
 
-import {
-  ChannelType,
-  SlashCommandBuilder,
-  MessageFlags,
-  type ChatInputCommandInteraction,
-  type Client,
-  type TextChannel,
-} from "discord.js";
-
 import type { BotConfig } from "./config.js";
+import type { DiscordRest } from "./discord/rest.js";
+import { stringOption, userIdOf, usernameOf, type Interaction } from "./discord/types.js";
 import { findExistingClaim } from "./eligibility.js";
 import { renderBoard, renderRefusal, renderStatus, renderTaskBrief } from "./format.js";
 import { explainError, type TaskService } from "./service.js";
 
-export function buildCommands(projects: readonly string[]) {
-  const projectChoices = projects.map((p) => ({ name: p, value: p }));
+const STRING_OPTION = 3;
 
+/** Command definitions, as Discord's registration API wants them. */
+export function buildCommands(projects: readonly string[]) {
+  const choices = projects.map((p) => ({ name: p, value: p }));
   return [
-    new SlashCommandBuilder()
-      .setName("task")
-      .setDescription("Claim the next available task in a project")
-      .addStringOption((o) =>
-        o
-          .setName("project")
-          .setDescription("Which project to claim from")
-          .setRequired(true)
-          .addChoices(...projectChoices)
-      ),
-    new SlashCommandBuilder().setName("status").setDescription("Show the task you currently hold"),
-    new SlashCommandBuilder().setName("release").setDescription("Give up the task you hold"),
-    new SlashCommandBuilder()
-      .setName("board")
-      .setDescription("Open tasks and active claims across every project")
-      .addStringOption((o) =>
-        o
-          .setName("project")
-          .setDescription("Limit to one project (default: show all)")
-          .setRequired(false)
-          .addChoices(...projectChoices)
-      ),
-  ].map((c) => c.toJSON());
+    {
+      name: "task",
+      description: "Claim the next available task in a project",
+      options: [
+        {
+          name: "project",
+          description: "Which project to claim from",
+          type: STRING_OPTION,
+          required: true,
+          choices,
+        },
+      ],
+    },
+    { name: "status", description: "Show the task you currently hold" },
+    { name: "release", description: "Give up the task you hold" },
+    {
+      name: "board",
+      description: "Open tasks and active claims across every project",
+      options: [
+        {
+          name: "project",
+          description: "Limit to one project (default: show all)",
+          type: STRING_OPTION,
+          required: false,
+          choices,
+        },
+      ],
+    },
+  ];
 }
 
-type Ctx = { service: TaskService; config: BotConfig; client: Client };
+/** `/board` is public; everything else answers only the caller. */
+export function isEphemeral(commandName: string): boolean {
+  return commandName !== "board";
+}
 
-export async function handleInteraction(
-  interaction: ChatInputCommandInteraction,
-  ctx: Ctx
-): Promise<void> {
-  // Every command reads GitHub, which is comfortably slower than Discord's
-  // 3-second reply deadline.
-  await interaction.deferReply({
-    flags: interaction.commandName === "board" ? undefined : MessageFlags.Ephemeral,
-  });
+export type CommandContext = {
+  service: TaskService;
+  config: BotConfig;
+  rest: DiscordRest;
+};
+
+/**
+ * Run a command and return the text to put in the follow-up edit.
+ *
+ * Never throws: a command that blows up should tell the caller something useful
+ * rather than leave Discord showing "thinking…" until it times out.
+ */
+export async function runCommand(interaction: Interaction, ctx: CommandContext): Promise<string> {
+  const name = interaction.data?.name ?? "";
+  const discordId = userIdOf(interaction);
+  if (!discordId) return "I could not tell who you are.";
 
   try {
-    switch (interaction.commandName) {
+    switch (name) {
       case "task":
-        return await handleTask(interaction, ctx);
+        return await runTask(interaction, ctx, discordId);
       case "status":
-        return await handleStatus(interaction, ctx);
+        return await runStatus(ctx, discordId);
       case "release":
-        return await handleRelease(interaction, ctx);
+        return await runRelease(ctx, discordId);
       case "board":
-        return await handleBoard(interaction, ctx);
+        return await runBoard(interaction, ctx);
       default:
-        await interaction.editReply(`Unknown command \`${interaction.commandName}\`.`);
+        return `Unknown command \`${name}\`.`;
     }
   } catch (error) {
-    console.error(`[${interaction.commandName}]`, error);
-    await interaction.editReply(explainError(error));
+    console.error(`[${name}]`, error);
+    return explainError(error);
   }
 }
 
-async function handleTask(interaction: ChatInputCommandInteraction, ctx: Ctx): Promise<void> {
-  const project = interaction.options.getString("project", true);
-  const outcome = await ctx.service.claim(project, interaction.user.id);
+async function runTask(
+  interaction: Interaction,
+  ctx: CommandContext,
+  discordId: string
+): Promise<string> {
+  const project = stringOption(interaction, "project");
+  if (!project) return "Pick a project.";
 
-  if (!outcome.ok) {
-    await interaction.editReply(renderRefusal(outcome.refusal, project));
-    return;
-  }
+  const outcome = await ctx.service.claim(project, discordId);
+  if (!outcome.ok) return renderRefusal(outcome.refusal, project);
 
   const { task, branch, repo } = outcome;
   const brief = renderTaskBrief({ task, project, repo });
 
-  // The claim is already written. The thread is a convenience on top — if it
-  // fails, the contributor still holds the task and still has the brief, so
-  // this must not throw away a successful claim.
+  // The claim is already committed. A thread is a convenience on top, so a
+  // Discord failure here must not discard a successful claim.
   let threadNote = "";
   try {
-    const channel = await ctx.client.channels.fetch(ctx.config.channels.code);
-    if (channel && channel.type === ChannelType.GuildText) {
-      const thread = await (channel as TextChannel).threads.create({
-        name: `${task.id} ${task.title}`.slice(0, 100),
-        autoArchiveDuration: 10080,
-        reason: `claim by ${interaction.user.tag}`,
-      });
-      await thread.send(`<@${interaction.user.id}> claimed this.\n\n${brief}`);
-      await ctx.service.recordThread(project, task.id, thread.id);
-      threadNote = `\nThread: <#${thread.id}>`;
-    }
+    const thread = await ctx.rest.createThread(
+      ctx.config.channels.code,
+      `${task.id} ${task.title}`
+    );
+    await ctx.rest.postMessage(thread.id, `<@${discordId}> claimed this.\n\n${brief}`);
+    await ctx.service.recordThread(project, task.id, thread.id);
+    threadNote = `\nThread: <#${thread.id}>`;
   } catch (error) {
     console.error("[task] thread creation failed", error);
     threadNote = "\n(I could not open a thread — the claim still stands.)";
   }
 
-  await interaction.editReply(
-    `You now hold **${task.id}** in \`${project}\`.\n` +
-      `Branch: \`${branch}\`${threadNote}\n\n${brief}`.slice(0, 1900)
-  );
+  return (
+    `${usernameOf(interaction)}, you now hold **${task.id}** in \`${project}\`.\n` +
+    `Branch: \`${branch}\`${threadNote}\n\n${brief}`
+  ).slice(0, 1900);
 }
 
-async function handleStatus(interaction: ChatInputCommandInteraction, ctx: Ctx): Promise<void> {
+async function runStatus(ctx: CommandContext, discordId: string): Promise<string> {
   const states = await ctx.service.loadAll();
-  const held = findExistingClaim(states, interaction.user.id);
+  const held = findExistingClaim(states, discordId);
   const task = held
     ? states
         .find((s) => s.project === held.project)
         ?.tasks.tasks.find((t) => t.id === held.claim.task_id)
     : undefined;
-  await interaction.editReply(renderStatus(held, task));
+  return renderStatus(held, task);
 }
 
-async function handleRelease(interaction: ChatInputCommandInteraction, ctx: Ctx): Promise<void> {
-  const released = await ctx.service.release(interaction.user.id);
-  await interaction.editReply(
-    released
-      ? `Released **${released.released}** in \`${released.project}\`. It is open again.`
-      : "You hold no claim, so there is nothing to release."
-  );
+async function runRelease(ctx: CommandContext, discordId: string): Promise<string> {
+  const released = await ctx.service.release(discordId);
+  return released
+    ? `Released **${released.released}** in \`${released.project}\`. It is open again.`
+    : "You hold no claim, so there is nothing to release.";
 }
 
-async function handleBoard(interaction: ChatInputCommandInteraction, ctx: Ctx): Promise<void> {
-  const filter = interaction.options.getString("project");
+async function runBoard(interaction: Interaction, ctx: CommandContext): Promise<string> {
+  const filter = stringOption(interaction, "project");
   const states = await ctx.service.loadAll();
   const shown = filter ? states.filter((s) => s.project === filter) : states;
-  await interaction.editReply(renderBoard(shown));
+  return renderBoard(shown);
 }

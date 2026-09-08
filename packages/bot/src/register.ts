@@ -2,29 +2,27 @@
  * Register the slash commands with Discord.
  *
  * Guild-scoped, not global: guild commands appear instantly, while global ones
- * can take up to an hour to propagate. For a five-person experiment in one
- * server there is no reason to wait.
+ * can take up to an hour to propagate. For one server there is no reason to wait.
  *
- *   npm run -w @darwin/bot register
+ *   node --env-file=../../.env packages/bot/dist/register.js
  */
 
-import { REST, Routes } from "discord.js";
 import { loadBotConfig } from "./config.js";
 import { buildCommands } from "./commands.js";
+import { DiscordRest } from "./discord/rest.js";
 
-const config = loadBotConfig();
+const config = loadBotConfig(process.env);
 const projects = Object.keys(config.state.projects);
-const commands = buildCommands(projects);
+const rest = new DiscordRest(config.token);
 
-const rest = new REST({ version: "10" }).setToken(config.token);
-
-const result = (await rest.put(
-  Routes.applicationGuildCommands(config.applicationId, config.guildId),
-  { body: commands }
-)) as Array<{ name: string }>;
+const registered = await rest.registerGuildCommands(
+  config.applicationId,
+  config.guildId,
+  buildCommands(projects)
+);
 
 console.log(
-  `Registered ${result.length} command(s) to guild ${config.guildId}: ` +
-    result.map((c) => "/" + c.name).join(", ")
+  `Registered ${registered.length} command(s) to guild ${config.guildId}: ` +
+    registered.map((c) => "/" + c.name).join(", ")
 );
 console.log(`Projects offered by /task: ${projects.join(", ")}`);

@@ -6,7 +6,7 @@
  */
 
 export { StateStore } from "./store.js";
-export { loadConfig, resolveRepo, type StateConfig } from "./config.js";
+export { loadConfig, resolveRepo, type StateConfig, type EnvRecord } from "./config.js";
 export { StateError, isStateError, type StateErrorCode } from "./errors.js";
 export { globsIntersect, pathSetsIntersect, intersectingPairs } from "./glob.js";
 export {

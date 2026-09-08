@@ -103,6 +103,22 @@ async function checkDiscord(env) {
   }
   record("bot token", true, `authenticated as ${me.body.username} (${me.body.id})`);
 
+  // The interactions endpoint verifies every request against this key, so a
+  // wrong one means Discord refuses to save the endpoint at all.
+  if (!env.DISCORD_PUBLIC_KEY) {
+    record("public key", false, "not set — Developer Portal > General Information > Public Key");
+  } else if (!/^[0-9a-fA-F]{64}$/.test(env.DISCORD_PUBLIC_KEY)) {
+    record("public key", false, "should be 64 hex characters");
+  } else {
+    const app = await discordApi(env.DISCORD_TOKEN, "/oauth2/applications/@me");
+    const expected = app.body?.verify_key;
+    record(
+      "public key matches the application",
+      expected === env.DISCORD_PUBLIC_KEY,
+      expected === env.DISCORD_PUBLIC_KEY ? "" : "does not match this application's verify_key"
+    );
+  }
+
   if (env.DISCORD_APPLICATION_ID && env.DISCORD_APPLICATION_ID !== me.body.id) {
     record(
       "application id matches bot",

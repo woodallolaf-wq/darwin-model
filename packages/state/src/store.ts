@@ -27,16 +27,37 @@
 import { Octokit } from "@octokit/rest";
 import { StateError } from "./errors.js";
 import { DOCUMENTS, type DocumentName, type DocumentType } from "./schemas.js";
-import { loadConfig, resolveRepo, type StateConfig } from "./config.js";
+import { resolveRepo, type StateConfig } from "./config.js";
 
 type CacheEntry = { value: unknown; sha: string; expires: number };
 
-/** GitHub's contents API needs base64, and the file is UTF-8 JSON. */
-function decode(content: string): string {
-  return Buffer.from(content, "base64").toString("utf8");
+/**
+ * GitHub's contents API needs base64, and the file is UTF-8 JSON.
+ *
+ * Deliberately written against atob/btoa and TextEncoder rather than Buffer, so
+ * this package runs unchanged on a worker runtime as well as under Node. Buffer
+ * is the single thing that would otherwise force a Node-compatibility flag on
+ * the serverless deployment.
+ *
+ * atob/btoa are latin1, so the UTF-8 conversion has to be explicit in both
+ * directions — otherwise every em dash in a task contract corrupts silently.
+ */
+function decode(base64: string): string {
+  const binary = atob(base64.replace(/[^A-Za-z0-9+/=]/g, ""));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
 }
+
 function encode(text: string): string {
-  return Buffer.from(text, "utf8").toString("base64");
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  // Chunked so a large task table cannot blow the argument limit on apply().
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
 }
 
 /**
@@ -60,7 +81,7 @@ export class StateStore {
   readonly #config: StateConfig;
   readonly #cache = new Map<string, CacheEntry>();
 
-  constructor(config: StateConfig = loadConfig(), octokit?: Octokit) {
+  constructor(config: StateConfig, octokit?: Octokit) {
     this.#config = config;
     this.#octokit = octokit ?? new Octokit({ auth: config.githubToken });
   }

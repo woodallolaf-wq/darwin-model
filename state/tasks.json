@@ -4,14 +4,15 @@
       "id": "t-001",
       "title": "Typed read/write layer over the repo as a datastore",
       "contract": {
-        "inputs": "A fine-grained GitHub PAT and a target repo (owner/name), supplied through the config module. Callers ask for one of the three state documents by name.",
+        "inputs": "A fine-grained GitHub PAT and the set of project repos it serves (owner/name), supplied through the config module. Callers name a repo and one of the three state documents.",
         "outputs": "packages/state exports typed read and write functions for state/tasks.json, state/claims.json and state/users.json. Reads return a parsed, validated document. Writes accept a mutation function and commit the result.",
         "invariants": [
           "Write path is: GET blob and sha, mutate in memory, PUT with that sha. On a 409, re-read and re-apply the mutation exactly once, then throw.",
           "Every write is validated against the zod schema before any network call. A document that fails validation never reaches GitHub.",
           "Reads are cached for 30 seconds.",
           "The zod schemas agree with state/schema/*.json — same required fields, same patterns, same enum values.",
-          "Node 22, ESM, TypeScript strict. No use of `any`."
+          "Node 22, ESM, TypeScript strict. No use of `any`.",
+          "The client is repo-parameterised. Three project repos are served by one process — darwin-model, wildplaces and nostia-landing-redesign — so a repo is an argument, never a module-level constant, and the 30s read cache is keyed by repo AND document."
         ],
         "must_not_break": [
           "state/schema/*.json stays the canonical shape; the zod schemas mirror it and never diverge from it unilaterally.",
@@ -35,13 +36,14 @@
       "id": "t-002",
       "title": "Discord /task command with claim collision detection",
       "contract": {
-        "inputs": "A Discord slash command /task from a user in state/users.json, handled by discord.js v14 on top of packages/state.",
-        "outputs": "Picks the first task where state is open, every id in depends_on is merged, and touched_paths does not glob-intersect any active claim. Writes the claim, opens a thread, and posts the contract, the open_decisions list, the issue link and the branch name task/<id>.",
+        "inputs": "A Discord slash command /task project:<name> from a user in state/users.json, handled by discord.js v14 on top of packages/state. The project option is required and offers the configured repos as choices.",
+        "outputs": "Within the named project, picks the first task where state is open, every id in depends_on is merged, and touched_paths does not glob-intersect any active claim IN THAT PROJECT. Writes the claim, opens a thread, and posts the contract, the open_decisions list, the issue link and the branch name task/<id>.",
         "invariants": [
           "Refuses if the caller already holds a claim, or is not in state/users.json.",
           "Glob intersection agrees with tools/validate-state.js — in particular src/panel/** must be treated as overlapping src/panel/foo.ts.",
           "No LLM call anywhere in the bot.",
-          "Two users racing /task cannot both be given overlapping tasks."
+          "Two users racing /task cannot both be given overlapping tasks.",
+          "A user holds at most one claim across ALL projects, not one per project. Collision detection is per-project, because two repos cannot share a file path."
         ],
         "must_not_break": [
           "state/claims.json stays schema-valid after every command.",
@@ -51,7 +53,8 @@
       "open_decisions": [
         "Whether the race between two simultaneous /task calls is prevented by an in-process queue, by relying on the 409 retry in packages/state, or by an advisory lock document in the repo.",
         "Whether 'first task' means lowest id, oldest issue, or fewest dependents, when several are eligible.",
-        "Whether the glob matcher is copied from tools/validate-state.js, imported from a new shared package, or reimplemented against the same test table."
+        "Whether the glob matcher is copied from tools/validate-state.js, imported from a new shared package, or reimplemented against the same test table.",
+        "Whether /board takes an optional project filter and otherwise shows all three, or requires a project like /task does. Showing everything answers 'what is there to do' in one command but gets long as the backlog grows across three repos."
       ],
       "touched_paths": [
         "packages/bot/**"

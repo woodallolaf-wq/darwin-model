@@ -6,6 +6,7 @@
     "moduleResolution": "NodeNext",
     "outDir": "dist",
     "rootDir": "src",
+    "composite": true,
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
@@ -19,5 +20,6 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  "references": [{ "path": "../state" }]
 }

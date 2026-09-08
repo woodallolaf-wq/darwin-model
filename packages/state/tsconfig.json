@@ -6,6 +6,7 @@
     "moduleResolution": "NodeNext",
     "outDir": "dist",
     "rootDir": "src",
+    "composite": true,
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,

@@ -30,14 +30,14 @@
       ],
       "depends_on": [],
       "issue": 1,
-      "state": "open"
+      "state": "merged"
     },
     {
       "id": "t-002",
       "title": "Discord /task command with claim collision detection",
       "contract": {
         "inputs": "A Discord slash command /task project:<name> from a user in state/users.json, handled by discord.js v14 on top of packages/state. The project option is required and offers the configured repos as choices.",
-        "outputs": "Within the named project, picks the first task where state is open, every id in depends_on is merged, and touched_paths does not glob-intersect any active claim IN THAT PROJECT. Writes the claim, opens a thread, and posts the contract, the open_decisions list, the issue link and the branch name task/<id>.",
+        "outputs": "Within the named project, picks the first task where state is open, every id in depends_on is merged, and touched_paths does not glob-intersect any active claim IN THAT PROJECT. Writes the claim, opens a thread, and posts the contract, the open_decisions list, the issue link and the branch name task/<id>. /board shows every configured project by default, grouped, and accepts an optional project filter.",
         "invariants": [
           "Refuses if the caller already holds a claim, or is not in state/users.json.",
           "Glob intersection agrees with tools/validate-state.js — in particular src/panel/** must be treated as overlapping src/panel/foo.ts.",
@@ -53,8 +53,7 @@
       "open_decisions": [
         "Whether the race between two simultaneous /task calls is prevented by an in-process queue, by relying on the 409 retry in packages/state, or by an advisory lock document in the repo.",
         "Whether 'first task' means lowest id, oldest issue, or fewest dependents, when several are eligible.",
-        "Whether the glob matcher is copied from tools/validate-state.js, imported from a new shared package, or reimplemented against the same test table.",
-        "Whether /board takes an optional project filter and otherwise shows all three, or requires a project like /task does. Showing everything answers 'what is there to do' in one command but gets long as the backlog grows across three repos."
+        "Whether the glob matcher is copied from tools/validate-state.js, imported from a new shared package, or reimplemented against the same test table."
       ],
       "touched_paths": [
         "packages/bot/**"

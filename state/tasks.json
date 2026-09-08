@@ -90,6 +90,93 @@
       "depends_on": [],
       "issue": 3,
       "state": "open"
+    },
+    {
+      "id": "t-004",
+      "title": "Bicep and OIDC deploy workflow for the bot on Azure Container Apps",
+      "contract": {
+        "inputs": "The bot's container image built from packages/bot's Dockerfile (from t-002), and Azure subscription/resource-group values supplied as GitHub Actions repository variables and OIDC federated credentials — no stored secret.",
+        "outputs": "deploy/ containing a Bicep template that provisions an Azure Container App (min replicas 1, no ingress, outbound websocket only) reading the Discord token and GitHub PAT from Key Vault, plus .github/workflows/deploy.yml that builds and pushes the image and runs `az deployment group create` against that template on every push to main that changes packages/bot/** or deploy/**.",
+        "invariants": [
+          "Authentication to Azure is via OIDC federated credentials (azure/login with no client secret); no service principal secret is stored in GitHub or in the repo.",
+          "The Container App is provisioned with minReplicas 1 and no external ingress, matching the outbound-only websocket connection the bot needs.",
+          "Discord token and GitHub PAT are read from Key Vault at deploy time; neither value appears in the workflow YAML or in deploy/ in plaintext."
+        ],
+        "must_not_break": [
+          "packages/bot/** stays the only place the bot's application code and Dockerfile live; deploy/ contains only infrastructure definitions.",
+          ".github/workflows/pr.yml keeps running on pull_request only; deploy.yml must trigger on push to main, never on pull_request, since it needs write credentials."
+        ]
+      },
+      "open_decisions": [
+        "Whether the workflow rebuilds and pushes the image on every push to main regardless of which files changed, or only when packages/bot/** or deploy/ changes — simplicity versus wasted deploys.",
+        "Whether Key Vault references are wired into the Container App as environment variables synced by Bicep, or mounted as a secret volume via the Key Vault CSI-equivalent — different blast radius if a value rotates.",
+        "Whether the container registry is Azure Container Registry provisioned by this same Bicep template, or an existing registry referenced by name — owning more infrastructure versus depending on a manual prerequisite."
+      ],
+      "touched_paths": [
+        "deploy/**",
+        ".github/workflows/deploy.yml"
+      ],
+      "depends_on": [
+        "t-002"
+      ],
+      "issue": 6,
+      "state": "open"
+    },
+    {
+      "id": "t-005",
+      "title": "Stale-claim report tool for the evening /verify pass",
+      "contract": {
+        "inputs": "state/claims.json and state/tasks.json, read directly from disk with no npm dependency, plus an optional --days flag (default 3).",
+        "outputs": "tools/stale-claims.js: a CLI script that prints each claim whose claimed_at is older than the threshold, alongside its task id and title, in a format /verify's report step can read or paste directly.",
+        "invariants": [
+          "Runs with a bare `node tools/stale-claims.js`, no npm install, consistent with the rest of tools/** staying dependency-free.",
+          "Age is computed from claimed_at in UTC, compared against the current time, using the same RFC3339 parsing the claims schema documents.",
+          "Exits 0 whether or not any stale claims are found; exit code reflects a script error, not the presence of stale claims."
+        ],
+        "must_not_break": [
+          "tools/validate-state.js remains the only script state writers must pass before committing; this tool never writes state.",
+          "state/schema/claims.json and state/schema/task.json stay the source of truth for field names this script reads."
+        ]
+      },
+      "open_decisions": [
+        "Whether staleness is judged purely by claimed_at age, or also checks for an open PR referencing the task (via `gh pr list`) and only flags claims with neither — more useful, but adds a network call and a `gh` dependency to a tool that has had none.",
+        "Whether output is a human-readable table for pasting into /verify's report, or JSON for a future consumer to parse — human-first is simpler now but forces a rewrite if something automates on top of it later.",
+        "Whether the --days threshold is a CLI flag, an environment variable, or hardcoded to match the '~3 days' the runbook and /verify already mention informally."
+      ],
+      "touched_paths": [
+        "tools/stale-claims.js"
+      ],
+      "depends_on": [],
+      "issue": 7,
+      "state": "open"
+    },
+    {
+      "id": "t-006",
+      "title": "CI check that a PR's diff stays inside its task's touched_paths",
+      "contract": {
+        "inputs": "A pull request's diff (`git diff --name-only` between base and head) and the task it claims to implement, found the same way /verify finds it: a `Task: t-XXX` line in the PR body, falling back to the task/t-XXX branch name.",
+        "outputs": "A new job in .github/workflows/pr.yml that looks up that task's touched_paths in state/tasks.json (read from the base ref, since the guard job already forbids editing state/ in the PR) and fails the check with the offending file names if any changed file falls outside every listed glob.",
+        "invariants": [
+          "Uses the same glob-intersection semantics as tools/validate-state.js — a file matches a directory glob like packages/bot/** — so a false failure never blocks a legitimately in-scope change.",
+          "The task lookup logic matches .claude/commands/verify.md's own rule: prefer the Task: t-XXX body line, fall back to the task/t-XXX branch name, and treat a PR that matches neither as suspect.",
+          "The job reads state/tasks.json only from the base branch's ref, never from the PR head, since a PR is forbidden from editing state/ anyway."
+        ],
+        "must_not_break": [
+          "The existing guard job in .github/workflows/pr.yml keeps failing any PR that edits state/ or tests/, independent of this new job.",
+          "PR body text is passed through env, never interpolated directly into a shell command, matching the existing decisions job's handling of attacker-controlled input."
+        ]
+      },
+      "open_decisions": [
+        "Whether the glob matcher is copied from tools/validate-state.js's self-contained function, or that function is exported and required directly from the workflow's script step — duplication versus a new implicit dependency between tools/ and .github/.",
+        "Whether a PR that names no task fails this new job outright, or only warns and lets the existing 'What I decided' check be the hard gate for that case.",
+        "Whether an out-of-scope file fails the whole job immediately, or the job lists every offending file across the diff before failing, to save the contributor a round trip."
+      ],
+      "touched_paths": [
+        ".github/workflows/pr.yml"
+      ],
+      "depends_on": [],
+      "issue": 8,
+      "state": "open"
     }
   ]
 }

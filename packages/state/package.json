@@ -1,0 +1,28 @@
+{
+  "name": "@darwin/state",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Treats a GitHub repo as a datastore for the task table, claims and users.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test \"test/**/*.test.js\""
+  },
+  "dependencies": {
+    "@octokit/rest": "^21.1.1",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "@types/node": "^22.13.5"
+  }
+}

@@ -10,7 +10,11 @@
     "validate:state": "node tools/validate-state.js",
     "test:glob": "node tools/validate-state.js --self-test",
     "test:smoke": "node --test \"tests/smoke/**/*.test.js\"",
-    "typecheck": "node -e \"console.log('no TypeScript in the tree yet — t-001 introduces packages/state and a real tsc run')\"",
-    "build": "node -e \"console.log('nothing to build yet — t-001 introduces the first buildable package')\""
-  }
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "test:unit": "npm run test --workspaces --if-present"
+  },
+  "workspaces": [
+    "packages/*"
+  ]
 }

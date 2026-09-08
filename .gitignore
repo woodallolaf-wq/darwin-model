@@ -9,3 +9,7 @@ build/
 Thumbs.db
 *.log
 .claude/settings.local.json
+
+# wrangler build/dry-run output
+.wrangler/
+*.wrangler-dryrun/

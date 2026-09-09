@@ -212,6 +212,94 @@
       ],
       "issue": 11,
       "state": "merged"
+    },
+    {
+      "id": "t-008",
+      "title": "Post a merge announcement to #merged from /verify",
+      "contract": {
+        "inputs": "A task and PR that a human has just approved for merge inside .claude/commands/verify.md's step 5 ('On an approved merge'): the task id, title, the PR number, and the already-configured DISCORD_CHANNEL_MERGED value plus a bot token available to the human's shell (the same DISCORD_TOKEN documented in docs/discord-setup.md and .env.example).",
+        "outputs": ".claude/commands/verify.md gains a final sub-step in section 5, after the state commit and push, that posts one message naming the task id, title and merged PR link to the #merged channel via a plain authenticated HTTPS call to Discord's REST API (POST /channels/{channel_id}/messages with an Authorization: Bot <token> header) — the same endpoint packages/bot/src/discord/rest.ts already calls, but issued from the human's own shell during /verify rather than from the bot.",
+        "invariants": [
+          "The announcement step runs only after the state commit and push in step 5 have already succeeded, since the merge itself must never be blocked or rolled back by a Discord failure.",
+          "A failed or skipped post is reported in /verify's closing summary (section 6) rather than silently swallowed, so a human notices #merged has gone quiet.",
+          "The token and channel id are read from the human's existing environment (the same values used to run the bot), never hardcoded or committed into .claude/commands/verify.md.",
+          "The message identifies the task id, its title, and a link to the merged PR."
+        ],
+        "must_not_break": [
+          "The existing merge sequence in verify.md section 5 (squash-merge, update state, validate, commit, push) keeps the same order and the same 'must pass before you commit' rule for the validator.",
+          "Section 6's closing report still lists what remains open and which claims are stale, in addition to the new announcement note."
+        ]
+      },
+      "open_decisions": [
+        "Whether the HTTPS call is a literal curl command written into verify.md for the human/agent running it to execute, or a small helper script under tools/ that verify.md invokes — a curl one-liner needs no new file, a script is reusable and testable.",
+        "Whether a missing or invalid token/channel id fails section 5 outright (treating the announcement as part of 'an approved merge') or only degrades to a note in the closing summary, leaving the merge itself unaffected.",
+        "Whether the message is posted once per merged PR immediately, or batched into a single message listing every task merged in that evening's /verify pass."
+      ],
+      "touched_paths": [
+        ".claude/commands/verify.md"
+      ],
+      "depends_on": [],
+      "issue": 13,
+      "state": "open"
+    },
+    {
+      "id": "t-009",
+      "title": "Post the daily generator report to #start via webhook",
+      "contract": {
+        "inputs": "The `=== ACTION REPORT ===` block the daily routine already produces at the end of every run (per tools/routine-prompt.md), plus a Discord webhook URL for the #start channel — the channel docs/discord-setup.md already documents as 'where /task is run and the daily report lands' but which nothing currently posts to.",
+        "outputs": "tools/routine-prompt.md gains a final numbered step, after the existing step 9 ('Final report'), instructing the routine to POST the report text to the #start channel using a bare curl call to a Discord incoming webhook URL (no npm dependency, matching the routine's existing constraint of a fresh sandbox with no install step) — with docs/runbook.md documenting where that webhook URL is provisioned for the human operating the routine.",
+        "invariants": [
+          "The webhook call uses only curl, matching every other network operation the routine already performs (git, gh) with zero additional dependency.",
+          "The webhook URL is never printed in the routine's own report or committed to the repo — docs/runbook.md documents it as a value the human sets on the routine's own stored configuration, the same out-of-repo mechanism already used for tools/routine-prompt.md itself.",
+          "A failed webhook POST does not undo, retry-loop, or block the git push that already happened in step 8; it is noted under this run's ACTION REQUIRED BY HUMAN instead.",
+          "Discord's 2000-character message limit is respected — a report longer than that is truncated with a note, not silently rejected by the API."
+        ],
+        "must_not_break": [
+          "The routine still prints the full, untruncated === ACTION REPORT === to its own run log regardless of whether the webhook post succeeds.",
+          "Step 7 (the validator gate) and step 8 (commit and push) keep running exactly as they do today, unaffected by whether a webhook URL is configured."
+        ]
+      },
+      "open_decisions": [
+        "Whether the full report is posted verbatim (risking truncation at 2000 characters on a busy day) or condensed to the Status/Tasks/ACTION REQUIRED lines with a link back to the commit.",
+        "Whether a missing webhook URL is silently skipped (the routine has run for months without this) or reported as a one-line ACTION REQUIRED BY HUMAN note so the gap gets noticed and fixed.",
+        "Whether the webhook posts on every run regardless of outcome, or only when there is something worth surfacing (tasks added, or a stop condition) — an operator watching #start versus one who only wants to be told when something needs attention."
+      ],
+      "touched_paths": [
+        "tools/routine-prompt.md",
+        "docs/runbook.md"
+      ],
+      "depends_on": [],
+      "issue": 14,
+      "state": "open"
+    },
+    {
+      "id": "t-010",
+      "title": "Retry a Discord 429 rate limit once in DiscordRest",
+      "contract": {
+        "inputs": "Any call through packages/bot/src/discord/rest.ts (editOriginalResponse, createThread, postMessage, registerGuildCommands) whose HTTP response from Discord is 429, carrying a Retry-After header and a JSON body with a retry_after field, per Discord's documented rate-limit response.",
+        "outputs": "The shared request path in rest.ts waits the indicated time and retries the same request exactly once before giving up, so a single burst of commands (e.g. several people running /task around the same moment, or the nightly integration suite) does not surface a rate-limit error to a contributor when a short wait would have succeeded.",
+        "invariants": [
+          "A 429 is retried at most once per call; a second consecutive 429 throws the same Error shape rest.ts already throws today, unchanged in wording for any other status code.",
+          "The wait duration comes from Discord's response (the JSON body's retry_after or the Retry-After header), not a fixed or guessed backoff.",
+          "Every non-429 error status continues to throw immediately with no added delay, exactly as today.",
+          "The retry adds no Node-only API (no Buffer) — only what already runs unchanged on the worker runtime."
+        ],
+        "must_not_break": [
+          "The public signatures and return types of editOriginalResponse, createThread, postMessage, and registerGuildCommands are unchanged.",
+          "The follow-up work in http.ts still completes inside the waitUntil CPU budget for the normal case (no 429); the retry path only adds delay when Discord itself signals a rate limit."
+        ]
+      },
+      "open_decisions": [
+        "Whether the retry logic wraps every call site through one shared internal helper (touching #request and the two fetch calls in editOriginalResponse), or is added only to the methods most likely to be hit under contention — one consistent code path versus a smaller diff.",
+        "Whether a wait longer than some cap (e.g. a couple of seconds) is honoured in full or treated as not worth retrying, given the worker's CPU-time budget under waitUntil.",
+        "Whether retry_after from the JSON body or the Retry-After header wins when a response somehow carries both and they disagree."
+      ],
+      "touched_paths": [
+        "packages/bot/src/discord/rest.ts"
+      ],
+      "depends_on": [],
+      "issue": 15,
+      "state": "open"
     }
   ]
 }

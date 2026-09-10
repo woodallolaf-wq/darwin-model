@@ -300,6 +300,95 @@
       "depends_on": [],
       "issue": 15,
       "state": "open"
+    },
+    {
+      "id": "t-011",
+      "title": "Cloudflare Worker scheduled trigger for a stale-claim nag in #code",
+      "contract": {
+        "inputs": "The worker's existing Cloudflare bindings (env, ctx), plus state/claims.json and state/tasks.json read through the already-merged packages/state client (StateStore / TaskService.loadAll), and the isStale/claimAgeHours/STALE_CLAIM_HOURS helpers already exported from packages/bot/src/eligibility.ts. A new Cloudflare Cron Trigger fires scheduled(event, env, ctx) on the worker.",
+        "outputs": "packages/bot/src/worker.ts exports a scheduled handler alongside the existing fetch handler; a new packages/bot/src/scheduled.ts holds the logic (loop every configured project, find claims where isStale() is true, post one Discord message per stale claim to #code via DiscordRest.postMessage, imported unmodified from discord/rest.ts). packages/bot/wrangler.toml gains a [triggers] block with a crons entry.",
+        "invariants": [
+          "No Node-only API (Buffer, node:crypto, fs) is introduced — the worker still runs with no nodejs_compat flag.",
+          "eligibility.ts, service.ts, format.ts and discord/rest.ts are imported as-is, not modified — the hosting/scheduling model is a shell concern, exactly as t-007 established for the HTTP path.",
+          "The scheduled handler reads with { fresh: true } (or accepts the 30s cache) but never writes to state/claims.json or state/tasks.json — nagging is read-only, it does not release or touch claims.",
+          "A failure reading one project's state does not stop the other configured projects from being checked in the same run."
+        ],
+        "must_not_break": [
+          "The existing fetch handler and every slash command behave exactly as before; this is a strictly additive export.",
+          "packages/bot/wrangler.toml's existing [vars] and the no-nodejs_compat comment stay in place."
+        ]
+      },
+      "open_decisions": [
+        "Whether the nag posts once per stale claim per cron run (repeating every tick until released — persistent but noisy) or the worker needs some way to remember it already nagged this claim (quieter, but there is no persistence layer available to a worker with no KV/D1 binding configured today).",
+        "Whether the message @-mentions the claimant directly or names them without a ping — a direct ping is more likely to be seen but is also the kind of thing that gets a bot muted.",
+        "The cron cadence (e.g. once daily vs. every few hours) — trading how quickly a stale claim gets surfaced against extra worker invocations and Discord messages for a five-person bot."
+      ],
+      "touched_paths": [
+        "packages/bot/src/worker.ts",
+        "packages/bot/src/scheduled.ts",
+        "packages/bot/wrangler.toml"
+      ],
+      "depends_on": [],
+      "issue": 16,
+      "state": "open"
+    },
+    {
+      "id": "t-012",
+      "title": "Backfill missing GitHub issues for tasks with issue: null",
+      "contract": {
+        "inputs": "state/tasks.json from each repo in GITHUB_TOKEN's scope (read the same way tools/check-credentials.mjs reads config — a .env file, dependency-free fetch), filtered to tasks where \"issue\": null.",
+        "outputs": "tools/backfill-issues.mjs, a CLI script (node tools/backfill-issues.mjs [--repo owner/name] [--apply]) that, for each task with issue: null, calls GET /search/issues for an existing open or closed issue whose title exactly matches the task's title in that repo; if none is found it calls POST /repos/{owner}/{repo}/issues to create one from the task's title and contract text. Without --apply it only prints what it would do; with --apply it also performs a state/tasks.json read-modify-write (GET blob+sha, set issue, PUT with that sha, matching the sha-retry-once pattern packages/state's StateStore.write already uses) so the task's issue field is filled in.",
+        "invariants": [
+          "Dependency-free: Node 22's built-in fetch, no npm install, matching every other script in tools/.",
+          "Never creates a second issue for a task that already has a non-null issue, and never touches a task's state, title, contract, open_decisions, touched_paths or depends_on — the only field it ever writes is issue.",
+          "The state/tasks.json write in --apply mode uses the same PUT-with-sha, retry-once-on-409 pattern as packages/state's StateStore.write, and node tools/validate-state.js still passes after it runs.",
+          "Secret values (the token) are never printed, matching tools/check-credentials.mjs."
+        ],
+        "must_not_break": [
+          "tools/validate-state.js remains the only gate a state writer must pass before the write is considered final; this tool must run it (or fail loudly) after an --apply write, not assume success.",
+          "tools/stale-claims.js (t-005) and this script stay independent — this one never reads or writes state/claims.json."
+        ]
+      },
+      "open_decisions": [
+        "Whether the search-before-create step (GET /search/issues by exact title) is worth the extra API call and the risk of a false-positive match on a coincidentally identical title, versus always creating fresh and accepting an occasional duplicate — the runbook's documented workaround today is \"add the issues by hand,\" which already risks duplicates.",
+        "Whether --apply's state write is in scope for this tool at all, or whether it should only ever print suggested issue numbers for a human to paste into state/tasks.json by hand, given that state/tasks.json today is written only by the routine and by /verify.",
+        "Whether a task in a non-open state (e.g. claimed or in_review) with a null issue is backfilled the same as an open one, or skipped as a stranger case that a human should look at directly."
+      ],
+      "touched_paths": [
+        "tools/backfill-issues.mjs"
+      ],
+      "depends_on": [],
+      "issue": 17,
+      "state": "open"
+    },
+    {
+      "id": "t-013",
+      "title": "Task cycle-time report from state/tasks.json git history",
+      "contract": {
+        "inputs": "Git history of state/tasks.json in one or more repos (git log -p -- state/tasks.json in a local clone, or the equivalent via the GitHub commits API for a repo this process only has a token for), read to find the commits where each task's state field changed (the routine and /verify both commit with a message naming the task id, e.g. \"state: t-004 claimed\", \"tasks: add t-011, t-012, t-013\").",
+        "outputs": "tools/task-stats.mjs, a dependency-free CLI script (node tools/task-stats.mjs [--repo owner/name]) that prints, per task that has reached merged or rejected, the elapsed time between its open commit and its final commit, and a small summary across all such tasks (count merged, count rejected, median and longest time-to-resolution).",
+        "invariants": [
+          "Dependency-free: Node 22's built-in fetch and child_process (for local git log) only, no npm install.",
+          "Never writes to state/ — purely a read/report tool, like tools/stale-claims.js.",
+          "A task whose full history cannot be reconstructed (e.g. the repo was shallow-cloned) is reported as \"unknown\", not silently omitted from the summary counts and not treated as a script error.",
+          "Exits 0 whether or not any merged/rejected tasks are found; a non-zero exit means the script itself failed, not that the numbers are uninteresting."
+        ],
+        "must_not_break": [
+          "tools/stale-claims.js (t-005) stays the tool for claims currently open; this one only ever looks at tasks that have already reached a terminal state.",
+          "tools/validate-state.js remains untouched and is not a dependency of this script."
+        ]
+      },
+      "open_decisions": [
+        "Whether time-to-resolution is measured from the task's open commit or from its claimed commit (from the routine's perspective vs. from the point someone actually started work) — the two answer different questions about where time is actually going.",
+        "Whether the tool reads git history from a local clone only (fast, but only covers whichever repo the script is run inside) or also supports reading a sibling repo's history through the GitHub API using GITHUB_TOKEN (consistent with the project serving three repos from one process, at the cost of a network dependency this tool would not otherwise need).",
+        "Whether the output is a human-readable table (consistent with tools/stale-claims.js's current format) or CSV, given specs/project.md's framing of git history as \"the experiment's dataset\" that something may eventually analyze programmatically."
+      ],
+      "touched_paths": [
+        "tools/task-stats.mjs"
+      ],
+      "depends_on": [],
+      "issue": 18,
+      "state": "open"
     }
   ]
 }

@@ -389,6 +389,92 @@
       "depends_on": [],
       "issue": 18,
       "state": "open"
+    },
+    {
+      "id": "t-014",
+      "title": "Retry a GitHub secondary rate limit in packages/state's StateStore",
+      "contract": {
+        "inputs": "Any GET or PUT call StateStore makes to the GitHub contents API (#fetch, write's createOrUpdateFileContents) whose response is a 403 with a Retry-After header or a JSON body matching GitHub's documented secondary rate limit shape (message containing \"secondary rate limit\"), or a 429 with Retry-After — distinct from the 409/422 sha-conflict case store.ts already retries.",
+        "outputs": "The read and write paths in packages/state/src/store.ts wait the indicated Retry-After duration (seconds) and retry the same request exactly once before throwing a typed StateError, so a burst of calls across three repos (the worker cold-starting on several near-simultaneous commands, or the nightly integration suite) does not surface a rate-limit failure to a contributor when a short wait would have succeeded.",
+        "invariants": [
+          "A secondary-rate-limit or 429 response is retried at most once per underlying GitHub call; a second consecutive one throws a StateError (code per the open decision below), not \"conflict\" — that code stays reserved for a stale sha.",
+          "This retry is independent of write()'s existing single retry-on-409/422: a call may be rate-limited once and sha-conflicted once across the same logical write without exceeding either budget.",
+          "The wait duration comes from the response's Retry-After header (or the JSON body's equivalent field, whichever GitHub actually sends), never a fixed guess.",
+          "No Node-only API is introduced — packages/state stays Buffer-free and runs unchanged on the worker runtime that packages/bot deploys to."
+        ],
+        "must_not_break": [
+          "The existing 409/422 sha-conflict retry-once-then-throw behaviour in write(), and its StateError code \"conflict\", are unchanged.",
+          "Every non-rate-limit, non-conflict error status continues to throw immediately through the same statusOf()-based branching, with the same StateError codes it uses today."
+        ]
+      },
+      "open_decisions": [
+        "Whether a wait longer than some cap (GitHub's secondary limits can ask for a minute or more) is honoured in full or treated as not worth retrying inline, given a Worker's request lifetime and the 3-second Discord deadline the bot is already built around.",
+        "Whether this retry is added to both read() and write(), or only to write() — a stale read simply serves from the 30s cache or fails the caller, while a failed write has no such fallback.",
+        "Whether a persistent rate limit after the one retry gets its own StateError code (e.g. \"rate_limited\") so callers like packages/bot's explainError can phrase it distinctly, or reuses \"transport\" and accepts a generic message."
+      ],
+      "touched_paths": [
+        "packages/state/src/store.ts"
+      ],
+      "depends_on": [],
+      "issue": 19,
+      "state": "open"
+    },
+    {
+      "id": "t-015",
+      "title": "/board option to list every open task instead of the first four",
+      "contract": {
+        "inputs": "The existing /board command and renderBoard() in packages/bot/src/format.ts, which today shows at most 4 open tasks per project and a \"…and N more\" line, plus the same optional project filter /board already accepts.",
+        "outputs": "buildCommands() in commands.ts gains a second optional boolean option on /board (e.g. all), and renderBoard() (or a new sibling function) accepts a flag that lists every open task in each shown project instead of truncating to 4, still going through the existing truncate() at the 2000-character Discord limit.",
+        "invariants": [
+          "Calling /board with the new option unset behaves exactly as today: at most 4 open tasks per project, \"…and N more\" for the rest.",
+          "Calling it with the option set never throws or silently drops a project when the full listing would exceed 2000 characters — it degrades the same way truncate() already degrades the rest of the board, with the same \"… (truncated)\" marker.",
+          "The project filter and the new option compose: /board project:<name> all:true lists every open task in just that one project."
+        ],
+        "must_not_break": [
+          "renderBoard()'s existing signature and default behaviour, so any other caller (present or future) that does not pass the new flag sees no change.",
+          "The claim listing and in-review line above the open-task list are unaffected by the new option."
+        ]
+      },
+      "open_decisions": [
+        "Whether an oversized full listing is left to truncate() (simple, but a busy backlog loses its tail with no way to see the rest) or split across multiple postMessage calls when it would not fit in one — more complete, but risks spamming the channel with several messages for one command.",
+        "Whether the new option is a boolean flag on the existing /board command, or a separate command (e.g. /board-all) — one command with more options versus a second command that never needs the truncation logic path at all.",
+        "Whether the in-review list also loses its truncation under the new option, or only the open-task list does, given the contract only names the open-task 4-item cap explicitly."
+      ],
+      "touched_paths": [
+        "packages/bot/src/commands.ts",
+        "packages/bot/src/format.ts"
+      ],
+      "depends_on": [],
+      "issue": 20,
+      "state": "open"
+    },
+    {
+      "id": "t-016",
+      "title": "Correlate a deferred acknowledgement with its follow-up edit in logs",
+      "contract": {
+        "inputs": "Every request handled by createHandler() in packages/bot/src/http.ts, from the moment a verified interaction is parsed through the deferred work registered with defer(), whose only current logging is a single console.error(\"[follow-up]\", error) call with no identifier tying it back to the request that produced it.",
+        "outputs": "http.ts generates or reuses one identifier per interaction and includes it in every console.error/console.log it emits for that request, so a person reading wrangler tail output during an incident can find every line that belongs to one Discord interaction.",
+        "invariants": [
+          "The identifier appears in the existing defer() callback's console.error(\"[follow-up]\", error) call, and in any additional log line this task adds, in a consistent, greppable format.",
+          "No Node-only API is introduced (no Buffer, no node:crypto, no AsyncLocalStorage) — the same handler still runs unchanged on the worker runtime with no nodejs_compat flag.",
+          "Logging changes never alter what runCommand() returns or what gets edited into the Discord message — this is observability only."
+        ],
+        "must_not_break": [
+          "createHandler()'s exported signature and the Handler type it returns.",
+          "The existing behaviour on error — editing the original response to \"Something went wrong and the maintainer has the logs.\" — is unchanged; only the console output alongside it gains the identifier."
+        ]
+      },
+      "open_decisions": [
+        "Whether the identifier is Discord's own interaction.id (free, already unique, but only available after the request body is parsed — not during a signature-verification failure) or a freshly generated id (crypto.randomUUID(), available from the very first log line but ties to nothing on Discord's own side).",
+        "Whether the id is logged only on failure (matching today's sole log site) or also on every deferred work's start/success, trading noise for visibility.",
+        "Whether the id is embedded in the follow-up Discord message text itself (visible to the contributor, so someone reporting \"it broke\" can quote it back) or kept server-side only in logs — user-facing debuggability versus a cleaner message."
+      ],
+      "touched_paths": [
+        "packages/bot/src/http.ts"
+      ],
+      "depends_on": [],
+      "issue": 21,
+      "state": "open"
     }
   ]
 }
